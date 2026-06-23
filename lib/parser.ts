@@ -44,11 +44,22 @@ export function normalizePmid(raw: string): string {
 /**
  * Normalizes PMCID to PMC + digits format.
  */
-export function normalizePmcid(value?: string): string | undefined {
+export function normalizePmcid(value?: string | null): string | undefined {
   if (!value) return undefined;
-  const cleaned = value.trim().replace(/^PMCID[:\s]*/i, "");
-  const digits = cleaned.replace(/^PMC/i, "").replace(/[^\d]/g, "");
-  return digits ? `PMC${digits}` : undefined;
+
+  const raw = String(value).trim();
+
+  const withoutLabel = raw
+    .replace(/^PMCID\s*:\s*/i, "")
+    .replace(/^PMC\s*:\s*/i, "")
+    .trim();
+
+  const match =
+    withoutLabel.match(/PMC?\s*(\d+)/i) || withoutLabel.match(/(\d+)/);
+
+  if (!match) return undefined;
+
+  return `PMC${match[1]}`;
 }
 
 /**

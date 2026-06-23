@@ -18,6 +18,8 @@ const NIH_CONVERTER_URL =
   "https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/";
 const PUBMED_ESEARCH_URL =
   "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi";
+const PUBMED_ELINK_URL =
+  "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi";
 const NIH_EMAIL = "vahhab.p@gmail.com";
 const NIH_TOOL = "crossref-reference-formatter";
 const API_TIMEOUT_MS = 15_000;
@@ -25,6 +27,9 @@ const CONCURRENCY_LIMIT = 3;
 
 /** In-memory cache scoped to one conversion request. */
 export type IdCache = Map<string, { doi?: string; pmid?: string; pmcid?: string }>;
+
+/** In-flight NIH requests to prevent concurrent cache overwrites. */
+export type InFlightCache = Map<string, Promise<IdentifierSet>>;
 
 export interface IdentifierSet {
   doi?: string;
@@ -41,9 +46,9 @@ export function mergeNihIdentifiers(
   nih: IdentifierSet
 ): IdentifierSet {
   return {
-    doi: original.doi || nih.doi,
-    pmid: original.pmid || nih.pmid,
-    pmcid: original.pmcid || nih.pmcid,
+    doi: original.doi ?? nih.doi,
+    pmid: original.pmid ?? nih.pmid,
+    pmcid: original.pmcid ?? nih.pmcid,
   };
 }
 
@@ -56,12 +61,30 @@ function mergeRecordIntoIds(
 ): IdentifierSet {
   if (!record) return input;
 
-  return {
+  const merged: IdentifierSet = {
     doi: normalizeDoi(record.doi || input.doi || "") || input.doi,
     pmid:
       normalizePmid(String(record.pmid ?? input.pmid ?? "")) || input.pmid,
-    pmcid: normalizePmcid(record.pmcid || input.pmcid) || input.pmcid,
+    pmcid: normalizePmcid(record.pmcid ?? input.pmcid) || input.pmcid,
   };
+
+  console.log("NIH raw record", record);
+  console.log("Merged NIH IDs", {
+    doi: merged.doi,
+    pmid: merged.pmid,
+    pmcid: merged.pmcid,
+  });
+
+  return merged;
+}
+
+/**
+ * Returns true when `next` has at least as much identifier data as `current`.
+ */
+function isRicherOrEqual(current: IdentifierSet, next: IdentifierSet): boolean {
+  const score = (ids: IdentifierSet) =>
+    (ids.doi ? 1 : 0) + (ids.pmid ? 1 : 0) + (ids.pmcid ? 1 : 0);
+  return score(next) >= score(current);
 }
 
 /**
@@ -69,33 +92,114 @@ function mergeRecordIntoIds(
  */
 async function lookupNihById(
   id: string,
-  cache: IdCache
+  cache: IdCache,
+  inFlight: InFlightCache
 ): Promise<IdentifierSet> {
   const cacheKey = `nih:${id}`;
+
   if (cache.has(cacheKey)) {
     return cache.get(cacheKey)!;
   }
+
+  const pending = inFlight.get(cacheKey);
+  if (pending) {
+    return pending;
+  }
+
+  const request = (async (): Promise<IdentifierSet> => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+    try {
+      const url = `${NIH_CONVERTER_URL}?ids=${encodeURIComponent(id)}&format=json`;
+      const response = await fetch(url, { signal: controller.signal });
+
+      if (!response.ok) {
+        if (!cache.has(cacheKey)) {
+          cache.set(cacheKey, {});
+        }
+        return cache.get(cacheKey)!;
+      }
+
+      const data = (await response.json()) as NihConverterResponse;
+      const record = data.records?.[0];
+      const merged = mergeRecordIntoIds(record, cache.get(cacheKey) ?? {});
+
+      const existing = cache.get(cacheKey) ?? {};
+      const best = isRicherOrEqual(existing, merged) ? merged : existing;
+      cache.set(cacheKey, best);
+      return best;
+    } catch (error) {
+      console.warn("NIH ID Converter lookup failed", error);
+      if (!cache.has(cacheKey)) {
+        cache.set(cacheKey, {});
+      }
+      return cache.get(cacheKey)!;
+    } finally {
+      clearTimeout(timeout);
+      inFlight.delete(cacheKey);
+    }
+  })();
+
+  inFlight.set(cacheKey, request);
+  return request;
+}
+
+/**
+ * Looks up PMCID via PubMed elink (browser-safe; NIH ID Converter blocks CORS).
+ */
+async function lookupPmcidByPmid(
+  pmid: string,
+  cache: IdCache
+): Promise<string | undefined> {
+  const cacheKey = `elink-pmc:${pmid}`;
+  if (cache.has(cacheKey)) {
+    return cache.get(cacheKey)?.pmcid;
+  }
+
+  const params = new URLSearchParams({
+    dbfrom: "pubmed",
+    db: "pmc",
+    id: pmid,
+    retmode: "json",
+    email: NIH_EMAIL,
+    tool: NIH_TOOL,
+  });
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
   try {
-    const url = `${NIH_CONVERTER_URL}?ids=${encodeURIComponent(id)}&format=json`;
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(
+      `${PUBMED_ELINK_URL}?${params.toString()}`,
+      { signal: controller.signal }
+    );
 
-    if (!response.ok) {
-      cache.set(cacheKey, {});
-      return {};
+    if (!response.ok) return undefined;
+
+    const data = (await response.json()) as {
+      linksets?: Array<{
+        linksetdbs?: Array<{
+          linkname?: string;
+          links?: string[];
+        }>;
+      }>;
+    };
+
+    const pmcLink = data.linksets?.[0]?.linksetdbs?.find(
+      (entry) => entry.linkname === "pubmed_pmc"
+    );
+    const pmcNumeric = pmcLink?.links?.[0];
+    const pmcid = normalizePmcid(pmcNumeric ? `PMC${pmcNumeric}` : undefined);
+
+    if (pmcid) {
+      cache.set(cacheKey, { pmcid });
     }
 
-    const data = (await response.json()) as NihConverterResponse;
-    const record = data.records?.[0];
-    const merged = mergeRecordIntoIds(record, {});
-    cache.set(cacheKey, merged);
-    return merged;
+    return pmcid || undefined;
   } catch (error) {
-    console.warn("NIH ID Converter lookup failed", error);
-    return {};
+    console.warn("PubMed elink PMC lookup failed", error);
+    return undefined;
   } finally {
     clearTimeout(timeout);
   }
@@ -151,28 +255,41 @@ async function lookupPmidByDoi(
  */
 export async function enrichWithNihIds(
   input: IdentifierSet,
-  cache: IdCache = new Map()
+  cache: IdCache = new Map(),
+  inFlight: InFlightCache = new Map()
 ): Promise<IdentifierSet> {
   let enriched: IdentifierSet = { ...input };
 
-  const candidateIds = [input.doi, input.pmid, input.pmcid].filter(Boolean) as string[];
+  if (input.doi) {
+    const byDoi = await lookupNihById(input.doi, cache, inFlight);
+    enriched = mergeNihIdentifiers(enriched, byDoi);
+  }
 
-  for (const id of candidateIds) {
-    const found = await lookupNihById(id, cache);
-    enriched = mergeNihIdentifiers(enriched, found);
+  if (enriched.pmid) {
+    const byPmid = await lookupNihById(enriched.pmid, cache, inFlight);
+    enriched = mergeNihIdentifiers(enriched, byPmid);
+  }
+
+  if (enriched.pmcid) {
+    const byPmcid = await lookupNihById(enriched.pmcid, cache, inFlight);
+    enriched = mergeNihIdentifiers(enriched, byPmcid);
   }
 
   if (enriched.doi && !enriched.pmid) {
     const pmid = await lookupPmidByDoi(enriched.doi, cache);
     if (pmid) {
-      enriched = { ...enriched, pmid };
+      enriched = mergeNihIdentifiers(enriched, { pmid });
     }
   }
 
-  // PMID → PMCID lookup when DOI lookup returned PMID but not PMCID.
   if (enriched.pmid && !enriched.pmcid) {
-    const byPmid = await lookupNihById(enriched.pmid, cache);
-    enriched = mergeNihIdentifiers(enriched, byPmid);
+    const pmcid = await lookupPmcidByPmid(enriched.pmid, cache);
+    if (pmcid) {
+      enriched = mergeNihIdentifiers(enriched, { pmcid });
+    } else {
+      const byPmid = await lookupNihById(enriched.pmid, cache, inFlight);
+      enriched = mergeNihIdentifiers(enriched, byPmid);
+    }
   }
 
   return enriched;
@@ -183,11 +300,13 @@ export async function enrichWithNihIds(
  */
 export async function enrichCrossrefIdentifiers(
   ref: ParsedReference,
-  cache: IdCache
+  cache: IdCache,
+  inFlight: InFlightCache
 ): Promise<EnrichedReference> {
   const ids = await enrichWithNihIds(
     { doi: ref.doi, pmid: ref.pmid, pmcid: ref.pmcid },
-    cache
+    cache,
+    inFlight
   );
 
   return {
@@ -205,9 +324,10 @@ export async function enrichCrossrefIdentifiers(
  */
 export async function enrichReferenceWithNih(
   ref: ParsedReference,
-  cache: IdCache
+  cache: IdCache,
+  inFlight: InFlightCache
 ): Promise<EnrichedReference> {
-  return enrichCrossrefIdentifiers(ref, cache);
+  return enrichCrossrefIdentifiers(ref, cache, inFlight);
 }
 
 /**
@@ -235,19 +355,32 @@ async function runWithConcurrency<T, R>(
   return results;
 }
 
+export interface NihEnrichmentContext {
+  cache: IdCache;
+  inFlight: InFlightCache;
+}
+
+/** Creates fresh NIH cache and in-flight maps for a conversion batch. */
+export function createNihContext(): NihEnrichmentContext {
+  return {
+    cache: new Map(),
+    inFlight: new Map(),
+  };
+}
+
 /**
  * Enriches all references with NIH identifier lookups only (fast local Convert).
  */
 export async function enrichReferencesLocal(
-  references: ParsedReference[]
+  references: ParsedReference[],
+  context: NihEnrichmentContext = createNihContext()
 ): Promise<EnrichedReference[]> {
-  const cache: IdCache = new Map();
   return runWithConcurrency(references, CONCURRENCY_LIMIT, (ref) =>
-    enrichReferenceWithNih(ref, cache)
+    enrichReferenceWithNih(ref, context.cache, context.inFlight)
   );
 }
 
-/** Creates a fresh NIH cache for a conversion batch. */
+/** @deprecated Use createNihContext */
 export function createNihCache(): IdCache {
   return new Map();
 }

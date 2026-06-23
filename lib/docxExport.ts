@@ -39,7 +39,7 @@ function buildReferenceParagraph(ref: EnrichedReference): Paragraph {
 
   for (const identifier of buildReferenceIdentifiers(ref)) {
     children.push(new TextRun({ text: " " }));
-    children.push(linkedRun(identifier.label, identifier.href));
+    children.push(linkedRun(identifier.text, identifier.href));
   }
 
   return new Paragraph({ children, spacing: { after: 200 } });

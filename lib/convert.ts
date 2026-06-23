@@ -4,7 +4,7 @@
  */
 
 import {
-  createNihCache,
+  createNihContext,
   enrichCrossrefIdentifiers,
   enrichReferencesLocal,
 } from "@/lib/enrich";
@@ -31,6 +31,16 @@ const CROSSREF_CONCURRENCY = 2;
  * Builds a ConversionResult from enriched references.
  */
 function buildResult(enriched: EnrichedReference[]): ConversionResult {
+  console.log(
+    "Final converted references",
+    enriched.map((ref) => ({
+      number: ref.number,
+      doi: ref.doi,
+      pmid: ref.pmid,
+      pmcid: ref.pmcid,
+    }))
+  );
+
   return {
     references: enriched,
     plainText: formatAllPlain(enriched),
@@ -61,7 +71,7 @@ async function runCrossrefBatch(
   references: ParsedReference[],
   onProgress: CrossrefProgressCallback | undefined,
   crossrefCache: CrossrefCache,
-  nihCache: ReturnType<typeof createNihCache>
+  nihContext: ReturnType<typeof createNihContext>
 ): Promise<{
   enriched: EnrichedReference[];
   crossrefFailed: boolean;
@@ -99,7 +109,11 @@ async function runCrossrefBatch(
       citationText: ref.cleanedCitationTextWithoutIdentifierLines,
     };
 
-    enriched[refIndex] = await enrichCrossrefIdentifiers(merged, nihCache);
+    enriched[refIndex] = await enrichCrossrefIdentifiers(
+      merged,
+      nihContext.cache,
+      nihContext.inFlight
+    );
     nihCompleted++;
     onProgress?.("nih", nihCompleted, total);
   }
@@ -129,13 +143,13 @@ export async function convertReferencesCrossref(
 ): Promise<ConversionResult> {
   const parsed = parseReferences(input);
   const crossrefCache: CrossrefCache = new Map();
-  const nihCache = createNihCache();
+  const nihContext = createNihContext();
 
   const { enriched, crossrefFailed } = await runCrossrefBatch(
     parsed,
     onProgress,
     crossrefCache,
-    nihCache
+    nihContext
   );
 
   if (crossrefFailed) {

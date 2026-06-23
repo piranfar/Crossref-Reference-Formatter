@@ -1,7 +1,11 @@
 "use client";
 
+import { useEffect } from "react";
 import type { EnrichedReference } from "@/types/reference";
-import { formatReferenceHtml } from "@/lib/format";
+import {
+  buildReferenceIdentifiers,
+  formatReferenceHtml,
+} from "@/lib/format";
 
 interface FormattedPreviewProps {
   references: EnrichedReference[];
@@ -23,6 +27,21 @@ export default function FormattedPreview({
   fullWidth = false,
   hidden = false,
 }: FormattedPreviewProps) {
+  useEffect(() => {
+    if (references.length > 0) {
+      console.log(
+        "Final converted references",
+        references.map((ref) => ({
+          number: ref.number,
+          doi: ref.doi,
+          pmid: ref.pmid,
+          pmcid: ref.pmcid,
+          identifiers: buildReferenceIdentifiers(ref).map((item) => item.text),
+        }))
+      );
+    }
+  }, [references]);
+
   if (hidden && references.length === 0 && !isLoading && !error) {
     return null;
   }
@@ -89,6 +108,28 @@ export default function FormattedPreview({
           __html: references.map(formatReferenceHtml).join("\n"),
         }}
       />
+
+      {/* Temporary debug: enriched identifier fields per reference */}
+      <details className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+        <summary className="cursor-pointer font-medium">
+          Debug: enriched identifiers
+        </summary>
+        <ul className="mt-2 space-y-2">
+          {references.map((ref) => (
+            <li key={ref.number}>
+              <span className="font-semibold">#{ref.number}</span>{" "}
+              DOI={ref.doi ?? "—"} | PMID={ref.pmid ?? "—"} | PMCID=
+              {ref.pmcid ?? "—"}
+              <div className="mt-1 text-slate-600">
+                Rendered:{" "}
+                {buildReferenceIdentifiers(ref)
+                  .map((item) => item.text)
+                  .join(" ") || "—"}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </details>
     </div>
   );
 }

@@ -2,7 +2,12 @@
  * Formats enriched references into Vancouver-style plain text and HTML output.
  */
 
-import type { EnrichedReference, ParsedReference, WarningEntry } from "@/types/reference";
+import type {
+  EnrichedReference,
+  ParsedReference,
+  ReferenceIdentifier,
+  WarningEntry,
+} from "@/types/reference";
 
 /**
  * Returns the citation body used for display and export (original text, identifiers stripped).
@@ -19,27 +24,29 @@ export function getDisplayCitationText(
 /**
  * Builds structured identifier link data for a reference.
  */
-export function buildReferenceIdentifiers(ref: EnrichedReference): Array<{
-  label: string;
-  href: string;
-}> {
-  const identifiers: Array<{ label: string; href: string }> = [];
+export function buildReferenceIdentifiers(
+  ref: EnrichedReference
+): ReferenceIdentifier[] {
+  const identifiers: ReferenceIdentifier[] = [];
 
   if (ref.doi) {
     identifiers.push({
-      label: `[DOI:${ref.doi}]`,
+      kind: "doi",
+      text: `[DOI:${ref.doi}]`,
       href: `https://doi.org/${ref.doi}`,
     });
   }
   if (ref.pmid) {
     identifiers.push({
-      label: `[PMID:${ref.pmid}]`,
+      kind: "pmid",
+      text: `[PMID:${ref.pmid}]`,
       href: `https://pubmed.ncbi.nlm.nih.gov/${ref.pmid}/`,
     });
   }
   if (ref.pmcid) {
     identifiers.push({
-      label: `[PMCID:${ref.pmcid}]`,
+      kind: "pmcid",
+      text: `[PMCID:${ref.pmcid}]`,
       href: `https://pmc.ncbi.nlm.nih.gov/articles/${ref.pmcid}/`,
     });
   }
@@ -52,7 +59,7 @@ export function buildReferenceIdentifiers(ref: EnrichedReference): Array<{
  * Only includes identifiers that actually exist — no placeholders.
  */
 function buildIdentifierSuffix(ref: EnrichedReference): string {
-  const parts = buildReferenceIdentifiers(ref).map((item) => item.label);
+  const parts = buildReferenceIdentifiers(ref).map((item) => item.text);
   return parts.length > 0 ? " " + parts.join(" ") : "";
 }
 
@@ -81,7 +88,7 @@ function escapeHtml(text: string): string {
 function buildIdentifierLinksHtml(ref: EnrichedReference): string {
   const parts = buildReferenceIdentifiers(ref).map(
     (item) =>
-      `<a href="${escapeHtml(item.href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.label)}</a>`
+      `<a href="${escapeHtml(item.href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.text)}</a>`
   );
 
   return parts.length > 0 ? " " + parts.join(" ") : "";

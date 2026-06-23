@@ -18,6 +18,13 @@ export interface ParsedReference {
   pmcid?: string;
 }
 
+/** Structured identifier link used across preview and export paths. */
+export interface ReferenceIdentifier {
+  kind: "doi" | "pmid" | "pmcid";
+  text: string;
+  href: string;
+}
+
 /** Enriched reference after external API lookups. */
 export interface EnrichedReference extends ParsedReference {
   /** True when no DOI, PMID, or PMCID could be resolved. */
