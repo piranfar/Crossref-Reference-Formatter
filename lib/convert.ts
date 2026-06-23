@@ -31,15 +31,17 @@ const CROSSREF_CONCURRENCY = 2;
  * Builds a ConversionResult from enriched references.
  */
 function buildResult(enriched: EnrichedReference[]): ConversionResult {
-  console.log(
-    "Final converted references",
-    enriched.map((ref) => ({
-      number: ref.number,
-      doi: ref.doi,
-      pmid: ref.pmid,
-      pmcid: ref.pmcid,
-    }))
-  );
+  if (process.env.NODE_ENV === "development") {
+    console.log(
+      "Final converted references",
+      enriched.map((ref) => ({
+        number: ref.number,
+        doi: ref.doi,
+        pmid: ref.pmid,
+        pmcid: ref.pmcid,
+      }))
+    );
+  }
 
   return {
     references: enriched,

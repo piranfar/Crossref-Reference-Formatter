@@ -24,14 +24,28 @@ const IDENTIFIER_LINE =
   /^\s*(?:https?:\/\/(?:dx\.)?doi\.org\/\S+|DOI:\s*\S+|doi:\s*\S+|PM(?:ID|id):\s*\d+|PMC(?:ID|id):\s*PMC?\d+)\s*$/i;
 
 /**
- * Normalizes a DOI by stripping common URL prefixes and trailing punctuation.
+ * Strips DOI URL prefixes and trailing punctuation without changing case.
  */
-export function normalizeDoi(raw: string): string {
+export function cleanDoi(raw: string): string {
   let doi = raw.trim();
   doi = doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "");
   doi = doi.replace(/^doi:\s*/i, "");
   doi = doi.replace(/[.,;)\]]+$/, "");
-  return doi.toLowerCase();
+  return doi;
+}
+
+/**
+ * Lowercases a DOI for cache keys and canonical comparison only.
+ */
+export function canonicalDoi(doi: string): string {
+  return cleanDoi(doi).toLowerCase();
+}
+
+/**
+ * @deprecated Prefer cleanDoi to preserve publisher path casing.
+ */
+export function normalizeDoi(raw: string): string {
+  return cleanDoi(raw);
 }
 
 /**
@@ -70,7 +84,7 @@ function extractDoi(text: string): string | undefined {
     pattern.lastIndex = 0;
     const match = pattern.exec(text);
     if (match?.[1]) {
-      return normalizeDoi(match[1]);
+      return cleanDoi(match[1]);
     }
   }
   return undefined;
@@ -203,4 +217,22 @@ export function parseReferences(input: string): ParsedReference[] {
   }
 
   return blocks.map(({ number, block }) => parseBlock(number, block));
+}
+
+/**
+ * Extracts the article title from a Vancouver-style citation string.
+ */
+export function extractTitleFromCitation(citation: string): string | undefined {
+  const withoutNumber = citation.replace(/^\d+\.\s*/, "").trim();
+  const firstDot = withoutNumber.indexOf(". ");
+  if (firstDot === -1) return undefined;
+
+  const afterAuthors = withoutNumber.slice(firstDot + 2).trim();
+  const titleEnd = afterAuthors.indexOf(". ");
+  if (titleEnd === -1) {
+    return afterAuthors || undefined;
+  }
+
+  const title = afterAuthors.slice(0, titleEnd).trim();
+  return title || undefined;
 }

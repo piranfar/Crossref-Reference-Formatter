@@ -10,6 +10,7 @@ import type {
   CrossrefWorkResponse,
   CrossrefWorksSearchResponse,
 } from "@/types/reference";
+import { canonicalDoi } from "@/lib/parser";
 
 const CROSSREF_WORKS_URL = "https://api.crossref.org/works";
 const CROSSREF_MAILTO = "vahhab.p@gmail.com";
@@ -359,7 +360,10 @@ export async function resolveCrossrefDoi(
     return { doi, citationText: displayText, failed: false, crossrefMatched: false };
   }
 
-  const resolvedDoi = work!.DOI?.toLowerCase() ?? doi;
+  const resolvedDoi =
+    doi && work!.DOI && canonicalDoi(doi) === canonicalDoi(work!.DOI)
+      ? doi
+      : (work!.DOI ?? doi);
 
   if (normalizeFromCrossref && work) {
     return {
