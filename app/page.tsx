@@ -139,17 +139,6 @@ export default function Home() {
     });
   }, []);
 
-  /** Copies Vancouver-style plain text to the clipboard (no links). */
-  const handleCopyPlainText = async () => {
-    if (!plainText) return;
-    try {
-      await navigator.clipboard.writeText(plainText);
-      showCopyFeedback("Plain text copied");
-    } catch {
-      showCopyFeedback("Copy failed", true);
-    }
-  };
-
   /** Copies rendered rich text with clickable hyperlinks to the clipboard. */
   const handleCopyRichText = async () => {
     if (references.length === 0) return;
@@ -203,7 +192,7 @@ export default function Home() {
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {/* Action buttons */}
-        <div className="mb-6 flex flex-wrap items-center gap-3">
+        <div className="mb-6 flex flex-wrap items-center justify-center gap-3">
           <button
             type="button"
             onClick={handleConvert}
@@ -229,15 +218,6 @@ export default function Home() {
             className="rounded-lg border border-slate-300 bg-white px-6 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Reset
-          </button>
-
-          <button
-            type="button"
-            onClick={handleCopyPlainText}
-            disabled={!hasOutput || isLoading}
-            className={buttonClass}
-          >
-            Copy Plain Text
           </button>
 
           <button
@@ -279,7 +259,7 @@ export default function Home() {
         </div>
 
         {progressMessage && (
-          <p className="mb-4 text-sm text-slate-600">{progressMessage}</p>
+          <p className="mb-4 text-center text-sm text-slate-600">{progressMessage}</p>
         )}
 
         {!hasConverted ? (
