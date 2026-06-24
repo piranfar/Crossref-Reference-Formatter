@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import FormattedPreview from "@/components/FormattedPreview";
 import OriginalReferencesPanel from "@/components/OriginalReferencesPanel";
 import ReferenceInput from "@/components/ReferenceInput";
@@ -25,6 +25,7 @@ function downloadBlob(blob: Blob, filename: string) {
  * Main page: input panel, formatted preview, and action buttons.
  */
 export default function Home() {
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [input, setInput] = useState("");
   const [references, setReferences] = useState<EnrichedReference[]>([]);
   const [plainText, setPlainText] = useState("");
@@ -120,23 +121,30 @@ export default function Home() {
     }
   }, [input]);
 
+  /** Clears all state and returns the app to the initial paste view. */
+  const handleReset = useCallback(() => {
+    setInput("");
+    setReferences([]);
+    setPlainText("");
+    setHtml("");
+    setError(null);
+    setCopyFeedback(null);
+    setCopyFeedbackError(false);
+    setHasConverted(false);
+    setShowOriginal(false);
+    setCrossrefProgress(null);
+
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  }, []);
+
   /** Copies Vancouver-style plain text to the clipboard (no links). */
   const handleCopyPlainText = async () => {
     if (!plainText) return;
     try {
       await navigator.clipboard.writeText(plainText);
       showCopyFeedback("Plain text copied");
-    } catch {
-      showCopyFeedback("Copy failed", true);
-    }
-  };
-
-  /** Copies raw HTML source code to the clipboard. */
-  const handleCopyHtml = async () => {
-    if (!html) return;
-    try {
-      await navigator.clipboard.writeText(html);
-      showCopyFeedback("HTML copied");
     } catch {
       showCopyFeedback("Copy failed", true);
     }
@@ -216,6 +224,15 @@ export default function Home() {
 
           <button
             type="button"
+            onClick={handleReset}
+            disabled={isLoading}
+            className="rounded-lg border border-slate-300 bg-white px-6 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Reset
+          </button>
+
+          <button
+            type="button"
             onClick={handleCopyPlainText}
             disabled={!hasOutput || isLoading}
             className={buttonClass}
@@ -230,15 +247,6 @@ export default function Home() {
             className={buttonClass}
           >
             Copy Rich Text
-          </button>
-
-          <button
-            type="button"
-            onClick={handleCopyHtml}
-            disabled={!hasOutput || isLoading}
-            className={buttonClass}
-          >
-            Copy HTML
           </button>
 
           <button
@@ -278,6 +286,7 @@ export default function Home() {
           /* Before conversion: prominent paste area */
           <div className="mx-auto max-w-4xl">
             <ReferenceInput
+              ref={inputRef}
               value={input}
               onChange={setInput}
               disabled={isLoading}
